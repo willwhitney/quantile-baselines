@@ -1,6 +1,6 @@
 agent:
-  name: sac
-  class: agent.sac.SACAgent
+  name: quantile
+  class: agent.quantile.SACAgent
   params:
     obs_dim: ??? # to be specified later
     action_dim: ??? # to be specified later
@@ -21,8 +21,10 @@ agent:
     critic_target_update_frequency: 2
     batch_size: 1024
     learnable_temperature: true
-    quantile: 0.5
+    quantile: 0.9
     expectation: false
+    entropy_reg: 1e-4
+    tune_entropy: false
 
 double_q_critic:
   class: agent.critic.DoubleQCritic

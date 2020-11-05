@@ -16,7 +16,8 @@ class SACAgent(Agent):
                  actor_cfg, discount, init_temperature, alpha_lr, alpha_betas,
                  actor_lr, actor_betas, actor_update_frequency, critic_lr,
                  critic_betas, critic_tau, critic_target_update_frequency,
-                 batch_size, learnable_temperature, quantile):
+                 batch_size, learnable_temperature, quantile, expectation,
+                 entropy_reg, tune_entropy):
         super().__init__()
 
         self.action_range = action_range
@@ -28,6 +29,9 @@ class SACAgent(Agent):
         self.batch_size = batch_size
         self.learnable_temperature = learnable_temperature
         self.quantile = quantile
+        self.expectation = expectation
+        self.entropy_reg = entropy_reg
+        self.tune_entropy = tune_entropy
 
         self.critic = hydra.utils.instantiate(critic_cfg).to(self.device)
         self.critic_target = hydra.utils.instantiate(critic_cfg).to(
@@ -139,24 +143,28 @@ class SACAgent(Agent):
 
     def update_actor_and_alpha(self, obs, logger, step):
         dist = self.actor(obs)
-        action = dist.sample()
+        action = dist.rsample()
         log_prob = dist.log_prob(action).sum(-1, keepdim=True)
         obs_action = torch.cat([obs, action], dim=-1)
+
+        # TODO: compute gradients on all the actions sampled for quantiles
+
         q_value = self.critic.Q1(obs_action)
         quantile_v_value = self.quantile_v(obs)
-
-        # slow_quantile_value = self.quantile_v_sequential(obs)
-        # import ipdb; ipdb.set_trace()
-
-        # print(f"Q(s): {q_value[0][0].item() :.4f}, "
-        #       f"V_p(s'): {quantile_v_value[0][0].item() :.4f}")
         quantile_advantage = torch.detach(q_value - quantile_v_value)
 
-        actor_loss = (log_prob * quantile_advantage).mean()
+        if self.tune_entropy:
+            actor_loss = (self.alpha.detach() * log_prob
+                        - log_prob * quantile_advantage).mean()
+        else:
+            actor_loss = (self.entropy_reg * log_prob
+                        - log_prob * quantile_advantage).mean()
 
         logger.log('train_actor/loss', actor_loss, step)
         logger.log('train_actor/target_entropy', self.target_entropy, step)
         logger.log('train_actor/entropy', -log_prob.mean(), step)
+        logger.log('train_actor/advantage', quantile_advantage.mean(), step)
+        logger.log('train_actor/advstd', quantile_advantage.std(), step)
 
         # optimize the actor
         self.actor_optimizer.zero_grad()
