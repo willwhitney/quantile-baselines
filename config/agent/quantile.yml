@@ -21,6 +21,8 @@ agent:
     critic_target_update_frequency: 2
     batch_size: 1024
     learnable_temperature: true
+    quantile: 0.5
+    expectation: false
 
 double_q_critic:
   class: agent.critic.DoubleQCritic

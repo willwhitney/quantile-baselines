@@ -101,22 +101,22 @@ class SACAgent(Agent):
 
         self.critic.log(logger, step)
 
-    def quantile_v_single(self, single_obs):
-        n = 100
-        dist = self.actor(single_obs)
-        actions = dist.sample((n,))
-        repeated_obs = torch.unsqueeze(single_obs, dim=0).repeat(
-            (n, *[1 for _ in single_obs.shape]))
-        obs_action = torch.cat([repeated_obs, actions], dim=-1)
-        values = self.critic.Q1(obs_action).reshape(-1)
-        quantile_value = torch.kthvalue(values, int(n * self.quantile)).values
-        return quantile_value
+    # def quantile_v_single(self, single_obs):
+    #     n = 100
+    #     dist = self.actor(single_obs)
+    #     actions = dist.sample((n,))
+    #     repeated_obs = torch.unsqueeze(single_obs, dim=0).repeat(
+    #         (n, *[1 for _ in single_obs.shape]))
+    #     obs_action = torch.cat([repeated_obs, actions], dim=-1)
+    #     values = self.critic.Q1(obs_action).reshape(-1)
+    #     quantile_value = torch.kthvalue(values, int(n * self.quantile)).values
+    #     return quantile_value
 
-    def quantile_v_sequential(self, obs):
-        result = torch.Tensor(obs.shape[0], 1).to(self.device)
-        for i in range(obs.shape[0]):
-            result[i][0] = self.quantile_v_single(obs[i])
-        return result
+    # def quantile_v_sequential(self, obs):
+    #     result = torch.Tensor(obs.shape[0], 1).to(self.device)
+    #     for i in range(obs.shape[0]):
+    #         result[i][0] = self.quantile_v_single(obs[i])
+    #     return result
 
     def quantile_v(self, obs):
         bsize = obs.shape[0]
@@ -129,8 +129,12 @@ class SACAgent(Agent):
         repeated_obs = obs.repeat_interleave(n, dim=0)
         obs_action = torch.cat([repeated_obs, actions], dim=-1)
         values = self.critic.Q1(obs_action).reshape((bsize, n))
-        quantile_values = torch.kthvalue(values, int(n * self.quantile)).values
-        return quantile_values.reshape((bsize, 1))
+        if self.expectation:
+            return values.mean(dim=1)
+        else:
+            k = int(n * self.quantile)
+            quantile_values = torch.kthvalue(values, k).values
+            return quantile_values.reshape((bsize, 1))
 
 
     def update_actor_and_alpha(self, obs, logger, step):

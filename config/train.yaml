@@ -1,7 +1,7 @@
 defaults:
     - agent: sac
 
-env: cheetah_run
+env: cartpole_balance
 
 # this needs to be specified manually
 experiment: test_exp
@@ -17,11 +17,11 @@ num_eval_episodes: 10
 device: cuda
 
 # logger
-log_frequency: 10000
+log_frequency: 1000
 log_save_tb: true
 
 # video recorder
-save_video: true
+save_video: false
 
 
 seed: 1
