@@ -16,7 +16,7 @@ class SACAgent(Agent):
                  actor_cfg, discount, init_temperature, alpha_lr, alpha_betas,
                  actor_lr, actor_betas, actor_update_frequency, critic_lr,
                  critic_betas, critic_tau, critic_target_update_frequency,
-                 batch_size, learnable_temperature, quantile):
+                 batch_size, learnable_temperature):
         super().__init__()
 
         self.action_range = action_range
@@ -27,7 +27,6 @@ class SACAgent(Agent):
         self.critic_target_update_frequency = critic_target_update_frequency
         self.batch_size = batch_size
         self.learnable_temperature = learnable_temperature
-        self.quantile = quantile
 
         self.critic = hydra.utils.instantiate(critic_cfg).to(self.device)
         self.critic_target = hydra.utils.instantiate(critic_cfg).to(
@@ -81,10 +80,8 @@ class SACAgent(Agent):
         next_action = dist.rsample()
         log_prob = dist.log_prob(next_action).sum(-1, keepdim=True)
         target_Q1, target_Q2 = self.critic_target(next_obs, next_action)
-
-        # remove this to convert from soft-Q to TD3
         target_V = torch.min(target_Q1,
-                             target_Q2) #- self.alpha.detach() * log_prob
+                             target_Q2) - self.alpha.detach() * log_prob
         target_Q = reward + (not_done * self.discount * target_V)
         target_Q = target_Q.detach()
 
@@ -101,54 +98,14 @@ class SACAgent(Agent):
 
         self.critic.log(logger, step)
 
-    def quantile_v_single(self, single_obs):
-        n = 100
-        dist = self.actor(single_obs)
-        actions = dist.sample((n,))
-        repeated_obs = torch.unsqueeze(single_obs, dim=0).repeat(
-            (n, *[1 for _ in single_obs.shape]))
-        obs_action = torch.cat([repeated_obs, actions], dim=-1)
-        values = self.critic.Q1(obs_action).reshape(-1)
-        quantile_value = torch.kthvalue(values, int(n * self.quantile)).values
-        return quantile_value
-
-    def quantile_v_sequential(self, obs):
-        result = torch.Tensor(obs.shape[0], 1).to(self.device)
-        for i in range(obs.shape[0]):
-            result[i][0] = self.quantile_v_single(obs[i])
-        return result
-
-    def quantile_v(self, obs):
-        bsize = obs.shape[0]
-        n = 32
-        dist = self.actor(obs)
-        actions = dist.sample((n,))  # n x bsize x *action_shape
-        actions = actions.transpose(0, 1)  # bsize x n x *action_shape
-        actions = actions.reshape((bsize * n, *actions.shape[2:]))
-        # -> bsize * n x *action_shape  =  [b0s0, b0s1, ..., b1s0, b1s1]
-        repeated_obs = obs.repeat_interleave(n, dim=0)
-        obs_action = torch.cat([repeated_obs, actions], dim=-1)
-        values = self.critic.Q1(obs_action).reshape((bsize, n))
-        quantile_values = torch.kthvalue(values, int(n * self.quantile)).values
-        return quantile_values.reshape((bsize, 1))
-
-
     def update_actor_and_alpha(self, obs, logger, step):
         dist = self.actor(obs)
-        action = dist.sample()
+        action = dist.rsample()
         log_prob = dist.log_prob(action).sum(-1, keepdim=True)
-        obs_action = torch.cat([obs, action], dim=-1)
-        q_value = self.critic.Q1(obs_action)
-        quantile_v_value = self.quantile_v(obs)
+        actor_Q1, actor_Q2 = self.critic(obs, action)
 
-        # slow_quantile_value = self.quantile_v_sequential(obs)
-        # import ipdb; ipdb.set_trace()
-
-        # print(f"Q(s): {q_value[0][0].item() :.4f}, "
-        #       f"V_p(s'): {quantile_v_value[0][0].item() :.4f}")
-        quantile_advantage = torch.detach(q_value - quantile_v_value)
-
-        actor_loss = (log_prob * quantile_advantage).mean()
+        actor_Q = torch.min(actor_Q1, actor_Q2)
+        actor_loss = (self.alpha.detach() * log_prob - actor_Q).mean()
 
         logger.log('train_actor/loss', actor_loss, step)
         logger.log('train_actor/target_entropy', self.target_entropy, step)
