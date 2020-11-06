@@ -144,6 +144,8 @@ class SACAgent(Agent):
     def update_actor_and_alpha(self, obs, logger, step):
         dist = self.actor(obs)
         action = dist.rsample()
+        detached_action = torch.clone(action)
+        # this doesn't work if you use detached_action
         log_prob = dist.log_prob(action).sum(-1, keepdim=True)
         obs_action = torch.cat([obs, action], dim=-1)
 
@@ -153,12 +155,13 @@ class SACAgent(Agent):
         quantile_v_value = self.quantile_v(obs)
         quantile_advantage = torch.detach(q_value - quantile_v_value)
 
+        # actor_loss = (- log_prob * quantile_advantage).mean()
         if self.tune_entropy:
             actor_loss = (self.alpha.detach() * log_prob
-                        - log_prob * quantile_advantage).mean()
+                          - log_prob * quantile_advantage).mean()
         else:
             actor_loss = (self.entropy_reg * log_prob
-                        - log_prob * quantile_advantage).mean()
+                          - log_prob * quantile_advantage).mean()
 
         logger.log('train_actor/loss', actor_loss, step)
         logger.log('train_actor/target_entropy', self.target_entropy, step)

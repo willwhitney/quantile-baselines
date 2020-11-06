@@ -134,7 +134,10 @@ class Workspace(object):
             if self.step >= self.cfg.num_seed_steps:
                 self.agent.update(self.replay_buffer, self.logger, self.step)
 
-            next_obs, reward, done, _ = self.env.step(action)
+            try:
+                next_obs, reward, done, _ = self.env.step(action)
+            except:
+                import ipdb; ipdb.set_trace()
 
             # allow infinite bootstrap
             done = float(done)

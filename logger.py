@@ -35,10 +35,11 @@ AGENT_TRAIN_FORMAT = {
         ('batch_reward', 'BR', 'float'),
         ('actor_loss', 'ALOSS', 'float'),
         ('critic_loss', 'CLOSS', 'float'),
-        ('alpha_loss', 'TLOSS', 'float'),
         ('actor_advantage', 'ADV', 'float'),
-        ('actor_advstd', 'ADVSTD', 'float'),
-        ('actor_entropy', 'AENT', 'float')
+        ('alpha_loss', 'TLOSS', 'float'),
+        ('alpha_value', 'TVAL', 'float'),
+        # ('actor_advstd', 'ADVSTD', 'float'),
+        ('actor_entropy', 'AENT', 'float'),
     ]
 }
 
