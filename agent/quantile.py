@@ -16,8 +16,8 @@ class SACAgent(Agent):
                  actor_cfg, discount, init_temperature, alpha_lr, alpha_betas,
                  actor_lr, actor_betas, actor_update_frequency, critic_lr,
                  critic_betas, critic_tau, critic_target_update_frequency,
-                 batch_size, learnable_temperature, quantile, expectation,
-                 entropy_reg, tune_entropy):
+                 batch_size, learnable_temperature, quantile, n_samples,
+                 expectation, entropy_reg, tune_entropy, all_actions):
         super().__init__()
 
         self.action_range = action_range
@@ -32,6 +32,8 @@ class SACAgent(Agent):
         self.expectation = expectation
         self.entropy_reg = entropy_reg
         self.tune_entropy = tune_entropy
+        self.all_actions = all_actions
+        self.n_samples = n_samples
 
         self.critic = hydra.utils.instantiate(critic_cfg).to(self.device)
         self.critic_target = hydra.utils.instantiate(critic_cfg).to(
@@ -122,56 +124,81 @@ class SACAgent(Agent):
     #         result[i][0] = self.quantile_v_single(obs[i])
     #     return result
 
-    def quantile_v(self, obs):
-        bsize = obs.shape[0]
-        n = 32
-        dist = self.actor(obs)
-        actions = dist.sample((n,))  # n x bsize x *action_shape
-        actions = actions.transpose(0, 1)  # bsize x n x *action_shape
-        actions = actions.reshape((bsize * n, *actions.shape[2:]))
-        # -> bsize * n x *action_shape  =  [b0s0, b0s1, ..., b1s0, b1s1]
-        repeated_obs = obs.repeat_interleave(n, dim=0)
-        obs_action = torch.cat([repeated_obs, actions], dim=-1)
-        values = self.critic.Q1(obs_action).reshape((bsize, n))
-        if self.expectation:
-            return values.mean(dim=1)
-        else:
-            k = int(n * self.quantile)
-            quantile_values = torch.kthvalue(values, k).values
-            return quantile_values.reshape((bsize, 1))
-
+    # def quantile_v(self, obs):
+    #     bsize = obs.shape[0]
+    #     n = 32
+    #     dist = self.actor(obs)
+    #     actions = dist.sample((n,))  # n x bsize x *action_shape
+    #     actions = actions.transpose(0, 1)  # bsize x n x *action_shape
+    #     actions = actions.reshape((bsize * n, *actions.shape[2:]))
+    #     # -> bsize * n x *action_shape  =  [b0s0, b0s1, ..., b1s0, b1s1]
+    #     repeated_obs = obs.repeat_interleave(n, dim=0)
+    #     obs_action = torch.cat([repeated_obs, actions], dim=-1)
+    #     values = self.critic.Q1(obs_action).reshape((bsize, n))
+    #     if self.expectation:
+    #         return values.mean(dim=1)
+    #     else:
+    #         k = int(n * self.quantile)
+    #         quantile_values = torch.kthvalue(values, k).values
+    #         return quantile_values.reshape((bsize, 1))
+        
 
     def update_actor_and_alpha(self, obs, logger, step):
         dist = self.actor(obs)
 
         # rsample action for entropy regularization
         action = dist.rsample()
-        log_prob = dist.log_prob(action).sum(-1, keepdim=True)
+        r_log_prob = dist.log_prob(action).sum(-1, keepdim=True)
 
-        # sample action for policy gradient
-        detached_action = dist.sample() 
-        detached_log_prob = dist.log_prob(detached_action).sum(-1, keepdim=True)
-        obs_action = torch.cat([obs, detached_action], dim=-1)
+        # sample actions for quantile
+        bsize = obs.shape[0]
+        n = self.n_samples
+        dist = self.actor(obs)
+        sampled_actions = dist.sample((n,))  # n x bsize x action_dim
+        actions = sampled_actions.transpose(0, 1)  # bsize x n x action_dim
+        actions = actions.reshape((bsize * n, *actions.shape[2:]))
+        # -> bsize * n x action_dim  =  [b0s0, b0s1, ..., b1s0, b1s1]
 
-        # TODO: compute gradients on all the actions sampled for quantiles
+        log_prob = dist.log_prob(sampled_actions) # n x bsize x action_dim
+        log_prob = log_prob.transpose(0, 1).sum(-1, keepdim=True) # bsize x n x  1
+        log_prob = log_prob.reshape((bsize * n, 1)) # bsize * n x  1
 
-        q_value = self.critic.Q1(obs_action)
-        quantile_v_value = self.quantile_v(obs)
-        quantile_advantage = torch.detach(q_value - quantile_v_value)
-
-        # actor_loss = (- log_prob * quantile_advantage).mean()
-        if self.tune_entropy:
-            actor_loss = (self.alpha.detach() * log_prob
-                          - detached_log_prob * quantile_advantage).mean()
+        repeated_obs = obs.repeat_interleave(n, dim=0) # b_size * n x obs_dim
+        obs_action = torch.cat([repeated_obs, actions], dim=-1)
+        q_values = self.critic.Q1(obs_action) # bsize * n x 1
+        reshaped_q_values = q_values.reshape((bsize, n)) # bsize x n
+        
+        if self.expectation:
+            baseline = reshaped_q_values.mean(dim=1, keepdim=True) # bsize x 1
+            repeated_baseline = baseline.repeat_interleave(n, dim=0) # bsize * n x 1
         else:
-            actor_loss = (self.entropy_reg * log_prob
-                          - detached_log_prob * quantile_advantage).mean()
+            k = int(n * self.quantile)
+            quantile_values = torch.kthvalue(reshaped_q_values, k).values
+            baseline = quantile_values.reshape((bsize, 1)) # bsize x 1
+            repeated_baseline = baseline.repeat_interleave(n, dim=0) # bsize * n x 1
+
+        if self.all_actions:
+            advantage = torch.detach(q_values - repeated_baseline)
+        else:
+            # sample new action for policy gradient
+            detached_action = dist.sample() 
+            log_prob = dist.log_prob(detached_action).sum(-1, keepdim=True)
+            obs_action = torch.cat([obs, detached_action], dim=-1)
+            q_value = self.critic.Q1(obs_action)
+            advantage = torch.detach(q_value - baseline)
+
+        if self.tune_entropy:
+            actor_loss = (self.alpha.detach() * r_log_prob).mean() - \
+                             (log_prob * advantage).mean()
+        else:
+            actor_loss = (self.entropy_reg * r_log_prob).mean() - \
+                             (log_prob * advantage).mean()
 
         logger.log('train_actor/loss', actor_loss, step)
         logger.log('train_actor/target_entropy', self.target_entropy, step)
         logger.log('train_actor/entropy', -log_prob.mean(), step)
-        logger.log('train_actor/advantage', quantile_advantage.mean(), step)
-        logger.log('train_actor/advstd', quantile_advantage.std(), step)
+        logger.log('train_actor/advantage', advantage.mean(), step)
+        logger.log('train_actor/advstd', advantage.std(), step)
 
         # optimize the actor
         self.actor_optimizer.zero_grad()

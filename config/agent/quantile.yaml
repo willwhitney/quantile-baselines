@@ -9,7 +9,7 @@ agent:
     critic_cfg: ${double_q_critic}
     actor_cfg: ${diag_gaussian_actor}
     discount: 0.99
-    init_temperature: 1e-3
+    init_temperature: 1e-2
     alpha_lr: 1e-4
     alpha_betas: [0.9, 0.999]
     actor_lr: 1e-4
@@ -23,8 +23,10 @@ agent:
     learnable_temperature: true
     quantile: 0.9
     expectation: false
-    entropy_reg: 1e-4
-    tune_entropy: false
+    entropy_reg: 1e-3
+    tune_entropy: true
+    n_samples: 32
+    all_actions: true
 
 double_q_critic:
   class: agent.critic.DoubleQCritic
