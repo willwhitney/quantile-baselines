@@ -101,7 +101,10 @@ class SACAgent(Agent):
     def update_actor_and_alpha(self, obs, logger, step):
         dist = self.actor(obs)
         action = dist.rsample()
+        
+        # detached_action = torch.clone(action)
         log_prob = dist.log_prob(action).sum(-1, keepdim=True)
+
         actor_Q1, actor_Q2 = self.critic(obs, action)
 
         actor_Q = torch.min(actor_Q1, actor_Q2)

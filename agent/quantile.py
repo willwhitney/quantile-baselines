@@ -82,7 +82,7 @@ class SACAgent(Agent):
     def update_critic(self, obs, action, reward, next_obs, not_done, logger,
                       step):
         dist = self.actor(next_obs)
-        next_action = dist.rsample()
+        next_action = dist.sample()
         log_prob = dist.log_prob(next_action).sum(-1, keepdim=True)
         target_Q1, target_Q2 = self.critic_target(next_obs, next_action)
 
@@ -143,11 +143,15 @@ class SACAgent(Agent):
 
     def update_actor_and_alpha(self, obs, logger, step):
         dist = self.actor(obs)
+
+        # rsample action for entropy regularization
         action = dist.rsample()
-        detached_action = torch.clone(action)
-        # this doesn't work if you use detached_action
         log_prob = dist.log_prob(action).sum(-1, keepdim=True)
-        obs_action = torch.cat([obs, action], dim=-1)
+
+        # sample action for policy gradient
+        detached_action = dist.sample() 
+        detached_log_prob = dist.log_prob(detached_action).sum(-1, keepdim=True)
+        obs_action = torch.cat([obs, detached_action], dim=-1)
 
         # TODO: compute gradients on all the actions sampled for quantiles
 
@@ -158,10 +162,10 @@ class SACAgent(Agent):
         # actor_loss = (- log_prob * quantile_advantage).mean()
         if self.tune_entropy:
             actor_loss = (self.alpha.detach() * log_prob
-                          - log_prob * quantile_advantage).mean()
+                          - detached_log_prob * quantile_advantage).mean()
         else:
             actor_loss = (self.entropy_reg * log_prob
-                          - log_prob * quantile_advantage).mean()
+                          - detached_log_prob * quantile_advantage).mean()
 
         logger.log('train_actor/loss', actor_loss, step)
         logger.log('train_actor/target_entropy', self.target_entropy, step)
