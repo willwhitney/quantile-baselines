@@ -9,7 +9,6 @@
 
 
 ## Online
-- optimize all sampled actions
 - try running more policy/Q updates per step
 - tune hyperparameters (n_samples, quantile, target_entropy) 
 - run more seeds
