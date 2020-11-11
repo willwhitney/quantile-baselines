@@ -14,7 +14,12 @@ num_seed_steps: 5000
 eval_frequency: 10000
 num_eval_episodes: 10
 
+save_frequency: 1e6
+
 device: cuda
+
+# settings
+log_propensities: false
 
 # logger
 log_frequency: 10000

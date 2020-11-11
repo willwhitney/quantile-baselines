@@ -10,8 +10,8 @@ import utils
 import hydra
 
 
-class SACAgent(Agent):
-    """SAC algorithm."""
+class QuantileAgent(Agent):
+    """Quantile algorithm."""
     def __init__(self, obs_dim, action_dim, action_range, device, critic_cfg,
                  actor_cfg, discount, init_temperature, alpha_lr, alpha_betas,
                  actor_lr, actor_betas, actor_update_frequency, critic_lr,
@@ -72,14 +72,18 @@ class SACAgent(Agent):
     def alpha(self):
         return self.log_alpha.exp()
 
-    def act(self, obs, sample=False):
+    def act(self, obs, sample=False, propensity=False):
         obs = torch.FloatTensor(obs).to(self.device)
         obs = obs.unsqueeze(0)
         dist = self.actor(obs)
         action = dist.sample() if sample else dist.mean
+        prob = dist.log_prob(action).sum(dim=-1, keepdim=True).exp()
         action = action.clamp(*self.action_range)
         assert action.ndim == 2 and action.shape[0] == 1
-        return utils.to_np(action[0])
+        if propensity:
+            return utils.to_np(action[0]), utils.to_np(prob[0])
+        else:
+            return utils.to_np(action[0])
 
     def update_critic(self, obs, action, reward, next_obs, not_done, logger,
                       step):
@@ -185,8 +189,10 @@ class SACAgent(Agent):
             # sample new action for policy gradient
             action = dist.sample() 
             log_prob = dist.log_prob(action).sum(-1, keepdim=True)
-            obs_action = torch.cat([obs, action], dim=-1)
-            q_value = self.critic.Q1(obs_action)
+            # obs_action = torch.cat([obs, action], dim=-1)
+            # q_value = self.critic.Q1(obs_action)
+            q1, q2 = self.critic(repeated_obs, actions)
+            q_value = torch.min(q1, q2)
             advantage = torch.detach(q_value - baseline)
 
         if self.tune_entropy:
@@ -233,3 +239,15 @@ class SACAgent(Agent):
         if step % self.critic_target_update_frequency == 0:
             utils.soft_update_params(self.critic, self.critic_target,
                                      self.critic_tau)
+
+    def save(self, model_dir, step):
+        torch.save(self.actor.state_dict(),
+                   '%s/actor_%s.pt' % (model_dir, step))
+        torch.save(self.critic.state_dict(),
+                   '%s/critic_%s.pt' % (model_dir, step))
+
+    def load(self, model_dir, step):
+        self.actor.load_state_dict(
+            torch.load('%s/actor_%s.pt' % (model_dir, step)))
+        self.critic.load_state_dict(
+           torch.load('%s/critic_%s.pt' % (model_dir, step)))

@@ -1,6 +1,6 @@
 agent:
   name: quantile
-  class: agent.quantile.SACAgent
+  class: agent.quantile.QuantileAgent
   params:
     obs_dim: ??? # to be specified later
     action_dim: ??? # to be specified later

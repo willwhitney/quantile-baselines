@@ -111,6 +111,10 @@ class Workspace(object):
                     self.logger.log('eval/episode', episode, self.step)
                     self.evaluate()
 
+                # save agent periodically
+                if self.step > 0 and self.step % self.cfg.save_frequency == 0:
+                    self.agent.save(self.work_dir, self.step)
+
                 self.logger.log('train/episode_reward', episode_reward,
                                 self.step)
 
@@ -126,9 +130,13 @@ class Workspace(object):
             # sample action for data collection
             if self.step < self.cfg.num_seed_steps:
                 action = self.env.action_space.sample()
+                propensity = 1.0 / np.prod(self.env.action_space.high - self.env.action_space.low)
             else:
                 with utils.eval_mode(self.agent):
-                    action = self.agent.act(obs, sample=True)
+                    if self.cfg.log_propensities:
+                        action, propensity = self.agent.act(obs, sample=True, propensity=True)
+                    else:
+                        action = self.agent.act(obs, sample=True)
 
             # run training update
             if self.step >= self.cfg.num_seed_steps:
@@ -144,7 +152,11 @@ class Workspace(object):
             done_no_max = 0 if episode_step + 1 == self.env._max_episode_steps else done
             episode_reward += reward
 
-            self.replay_buffer.add(obs, action, reward, next_obs, done,
+            if self.cfg.log_propensities:
+                self.replay_buffer.add(obs, action, reward, next_obs, done,
+                                   done_no_max, propensity)
+            else:
+                self.replay_buffer.add(obs, action, reward, next_obs, done,
                                    done_no_max)
 
             obs = next_obs
