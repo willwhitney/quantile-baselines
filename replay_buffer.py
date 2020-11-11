@@ -18,6 +18,8 @@ class ReplayBuffer(object):
         self.not_dones = np.empty((capacity, 1), dtype=np.float32)
         self.not_dones_no_max = np.empty((capacity, 1), dtype=np.float32)
 
+        self.propensities = np.empty((capacity, 1), dtype=np.float32)
+
         self.idx = 0
         self.last_save = 0
         self.full = False
@@ -25,7 +27,7 @@ class ReplayBuffer(object):
     def __len__(self):
         return self.capacity if self.full else self.idx
 
-    def add(self, obs, action, reward, next_obs, done, done_no_max):
+    def add(self, obs, action, reward, next_obs, done, done_no_max, propensity=None):
         np.copyto(self.obses[self.idx], obs)
         np.copyto(self.actions[self.idx], action)
         np.copyto(self.rewards[self.idx], reward)
@@ -33,10 +35,13 @@ class ReplayBuffer(object):
         np.copyto(self.not_dones[self.idx], not done)
         np.copyto(self.not_dones_no_max[self.idx], not done_no_max)
 
+        if propensity is not None:
+            np.copyto(self.propensities[self.idx], propensity)
+
         self.idx = (self.idx + 1) % self.capacity
         self.full = self.full or self.idx == 0
 
-    def sample(self, batch_size):
+    def sample(self, batch_size, sample_prop=False):
         idxs = np.random.randint(0,
                                  self.capacity if self.full else self.idx,
                                  size=batch_size)
@@ -50,4 +55,8 @@ class ReplayBuffer(object):
         not_dones_no_max = torch.as_tensor(self.not_dones_no_max[idxs],
                                            device=self.device)
 
-        return obses, actions, rewards, next_obses, not_dones, not_dones_no_max
+        if sample_prop:
+            propensity = torch.as_tensor(self.propensities[idxs], device=self.device)
+            return obses, actions, rewards, next_obses, not_dones, not_dones_no_max, propensity
+        else:
+            return obses, actions, rewards, next_obses, not_dones, not_dones_no_max

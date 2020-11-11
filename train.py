@@ -152,6 +152,7 @@ class Workspace(object):
             self.step += 1
 
 
+
 @hydra.main(config_path='config/train.yaml', strict=True)
 def main(cfg):
     workspace = Workspace(cfg)

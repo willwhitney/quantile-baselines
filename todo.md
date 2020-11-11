@@ -3,6 +3,7 @@
 - add propensity logging
 - construct dataset with logged propensities
 - construct bandit dataset (done=True)
+- make discrete action space version
 - check that bandit Q learning will work as expected
 - implement IW versions of algorithms
 

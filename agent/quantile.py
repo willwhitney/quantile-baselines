@@ -164,8 +164,10 @@ class SACAgent(Agent):
         log_prob = log_prob.reshape((bsize * n, 1)) # bsize * n x  1
 
         repeated_obs = obs.repeat_interleave(n, dim=0) # b_size * n x obs_dim
-        obs_action = torch.cat([repeated_obs, actions], dim=-1)
-        q_values = self.critic.Q1(obs_action) # bsize * n x 1
+        q1, q2 = self.critic(repeated_obs, actions)
+        q_values = torch.min(q1, q2)
+        #obs_action = torch.cat([repeated_obs, actions], dim=-1)
+        #q_values = self.critic.Q1(obs_action) # bsize * n x 1
         reshaped_q_values = q_values.reshape((bsize, n)) # bsize x n
         
         if self.expectation:
@@ -181,9 +183,9 @@ class SACAgent(Agent):
             advantage = torch.detach(q_values - repeated_baseline)
         else:
             # sample new action for policy gradient
-            detached_action = dist.sample() 
-            log_prob = dist.log_prob(detached_action).sum(-1, keepdim=True)
-            obs_action = torch.cat([obs, detached_action], dim=-1)
+            action = dist.sample() 
+            log_prob = dist.log_prob(action).sum(-1, keepdim=True)
+            obs_action = torch.cat([obs, action], dim=-1)
             q_value = self.critic.Q1(obs_action)
             advantage = torch.detach(q_value - baseline)
 
